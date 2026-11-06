@@ -56,6 +56,26 @@ comprobar_columnas <- function(df, necesarias, numericas, archivo) {
   }
 }
 
+# --- Informe con la interpretación de los resultados ---
+# Cada llamada a escribir() muestra el texto en la consola y lo guarda para
+# crear al final resultados/informe.md (Markdown, que GitHub muestra con formato).
+informe <- character()
+escribir <- function(...) {
+  texto <- paste0(...)
+  informe <<- c(informe, texto)
+  cat(texto, "\n", sep = "")
+}
+# Formato de números en español: 1.234,5
+num  <- function(x, decimales = 1) {
+  format(round(x, decimales), nsmall = decimales, big.mark = ".", decimal.mark = ",")
+}
+porc <- function(x, decimales = 1) paste0(num(100 * x, decimales), " %")
+fuerza <- function(r) {
+  if (abs(r) >= 0.7) "fuerte" else if (abs(r) >= 0.4) "moderada" else "débil"
+}
+texto_p <- function(p) if (p < 0.001) "p < 0,001" else paste("p =", num(p, 3))
+horas_a_anios <- function(h) h / (8 * 365)  # suponiendo 8 horas de uso al día
+
 # Si el script se ejecuta entero con Rscript, todos los gráficos van a un PDF
 if (!interactive()) {
   pdf("resultados/graficos.pdf", width = 10, height = 7)
@@ -83,6 +103,11 @@ datos <- datos %>%
 
 cat("Registros cargados:", nrow(datos), "\n")
 print(head(datos))
+
+escribir("# Informe del análisis de reparaciones\n")
+escribir("Generado el ", format(Sys.Date(), "%d/%m/%Y"), " a partir de `", ruta_reparaciones,
+         "` (", nrow(datos), " reparaciones) y `", ruta_fiabilidad, "`. ",
+         "Los gráficos están en `graficos.pdf` y la tabla de objetivos en `tabla_objetivos.csv`.\n")
 
 
 # =============================================================================
@@ -137,6 +162,27 @@ print(tabla_estadistica)
 print(datos %>% count(Tipo_Intervencion, sort = TRUE) %>% head(5))
 print(datos %>% count(Cliente_Tipo, sort = TRUE))
 
+# Interpretación
+t_media <- mean(datos$Tiempo_Horas);  t_mediana <- median(datos$Tiempo_Horas)
+c_media <- mean(datos$Coste_Total);   c_mediana <- median(datos$Coste_Total)
+cv_coste <- calcular_cv(datos$Coste_Total)
+tipos <- sort(table(datos$Tipo_Dispositivo), decreasing = TRUE)
+
+escribir("## 1. Cómo es una reparación típica\n")
+escribir("- La reparación mediana dura **", num(t_mediana), " h** y cuesta **", num(c_mediana, 0),
+         " €**. La media es de ", num(t_media), " h y ", num(c_media, 0), " €.")
+if (c_media > 1.1 * c_mediana) {
+  escribir("- Que la media esté claramente por encima de la mediana indica que unas pocas ",
+           "reparaciones muy largas o caras tiran de ella. Las distribuciones tienen cola a la ",
+           "derecha, así que la mediana representa mejor el caso típico.")
+}
+escribir("- El coeficiente de variación del coste es del ", num(cv_coste, 0), " %",
+         if (cv_coste > 100) ": la dispersión es muy alta, hay trabajos de coste muy distinto."
+         else ": la dispersión es moderada.")
+escribir("- En el ", porc(mean(datos$Coste_Material == 0), 0), " de las reparaciones no se usó ",
+         "material. El tipo de equipo más reparado es **", names(tipos)[1], "** (",
+         porc(tipos[[1]] / nrow(datos), 0), " del total).\n")
+
 
 # --- 2.1 Ajuste de distribuciones ---
 # Weibull, log-normal y gamma solo admiten valores positivos
@@ -165,8 +211,12 @@ comparar_ajustes <- function(ajustes, nombres, variable) {
   cdfcomp(ajustes,  legendtext = nombres, main = paste("CDF -", variable))
   qqcomp(ajustes,   legendtext = nombres, main = paste("QQ-plot -", variable))
   ppcomp(ajustes,   legendtext = nombres, main = paste("PP-plot -", variable))
-  gofstat(ajustes, fitnames = nombres)
+  bondad <- gofstat(ajustes, fitnames = nombres)
+  names(bondad$aic) <- nombres  # para poder saber después cuál gana
+  bondad
 }
+# Nombre de la distribución con menor AIC
+mejor_ajuste <- function(bondad) names(bondad$aic)[which.min(bondad$aic)]
 
 # Tiempo: log-normal, Weibull y gamma
 fit_t_lnorm   <- fitdist(datos_tiempo, "lnorm")
@@ -234,6 +284,24 @@ print(outliers_c %>% arrange(desc(Coste_Total)) %>%
 print(outliers_t %>% arrange(desc(Tiempo_Horas)) %>%
         select(ID_Incidencia, Tipo_Dispositivo, Equipo, Tiempo_Horas) %>% head(3))
 
+# Interpretación
+mas_cara <- datos[which.max(datos$Coste_Total), ]
+cola_pesada <- c("Pareto", "Burr")
+
+escribir("## 2. Qué distribución siguen los tiempos y los costes\n")
+escribir("- Entre log-normal, Weibull y gamma, la que mejor se ajusta según el AIC es la **",
+         mejor_ajuste(gof_t), "** para el tiempo y la **", mejor_ajuste(gof_c), "** para el coste.")
+escribir("- Al añadir distribuciones de cola pesada, gana la **", mejor_ajuste(gof_t2),
+         "** para el tiempo y la **", mejor_ajuste(gof_c2), "** para el coste.",
+         if (mejor_ajuste(gof_t2) %in% cola_pesada || mejor_ajuste(gof_c2) %in% cola_pesada)
+           paste(" Hay más valores extremos de los que predice una log-normal. Para presupuestar",
+                 "importa: las reparaciones caras no son tan raras como parecen.")
+         else " La log-normal sigue siendo suficiente para describir los extremos.")
+escribir("- Con el criterio del boxplot hay ", nrow(outliers_t), " reparaciones atípicas por tiempo (",
+         porc(nrow(outliers_t) / nrow(datos)), ") y ", nrow(outliers_c), " por coste (",
+         porc(nrow(outliers_c) / nrow(datos)), "). La más cara costó ", num(mas_cara$Coste_Total, 0),
+         " € (", mas_cara$Equipo, ", ", tolower(mas_cara$Tipo_Intervencion), ").\n")
+
 
 # =============================================================================
 # 3. CORRELACIÓN Y REGRESIÓN
@@ -289,6 +357,23 @@ s3d <- scatterplot3d(
   xlab = "Tiempo (horas)", ylab = "Material (€)", zlab = "Coste total (€)"
 )
 s3d$plane3d(modelo_coste, col = "red", lty = "dotted")  # plano de regresión
+
+# Interpretación
+rho_s <- matriz_spearman["Tiempo_Horas", "Coste_Total"]
+rho_p <- matriz_pearson["Tiempo_Horas", "Coste_Total"]
+coefs <- coef(modelo_coste)
+r2    <- summary(modelo_coste)$r.squared
+
+escribir("## 3. Qué explica el coste\n")
+escribir("- La correlación de Spearman entre horas y coste total es de ", num(rho_s, 2),
+         " (relación ", fuerza(rho_s), "). Pearson da ", num(rho_p, 2),
+         ". Pearson se ve mucho más afectada por los valores extremos, por eso se usa Spearman.")
+escribir("- La regresión explica el ", porc(r2), " de la variabilidad del coste total. ",
+         "Cada hora de trabajo añade de media ", num(coefs[["Tiempo_Horas"]], 1),
+         " € y cada euro de material se traslada al coste en ", num(coefs[["Coste_Material"]], 2), " €.")
+escribir("- Como el coste total es material más horas por tarifa, un R² alto es lo esperable. ",
+         "Lo útil del modelo es cuantificar la tarifa efectiva por hora y comprobar que el ",
+         "material se repercute casi íntegro al cliente.\n")
 
 
 # =============================================================================
@@ -398,6 +483,39 @@ tabla_weibull <- data.frame(
   Tasa_Fallo_ht       = signif(tasa_fallo(horas), 3)
 )
 print(tabla_weibull)
+
+# Interpretación
+# Test log-rank: ¿son distintas las curvas de supervivencia de las marcas?
+logrank   <- survdiff(Surv(Horas_Uso, Evento) ~ Marca, data = discos)
+p_logrank <- pchisq(logrank$chisq, df = length(logrank$n) - 1, lower.tail = FALSE)
+
+# Supervivencia de cada marca a las 10.000 horas (Kaplan-Meier)
+km_10000 <- summary(km_marcas, times = 10000, extend = TRUE)
+sup_10000 <- setNames(km_10000$surv, sub("Marca=", "", as.character(km_10000$strata)))
+marca_mejor <- names(sup_10000)[which.max(sup_10000)]
+marca_peor  <- names(sup_10000)[which.min(sup_10000)]
+
+escribir("## 4. Fiabilidad de los discos\n")
+escribir("- Se analizaron ", nrow(discos), " discos y ", sum(discos$Evento), " habían fallado (",
+         porc(mean(discos$Evento), 0), "). El resto seguía funcionando al revisarlo: son datos ",
+         "censurados, y por eso se usa análisis de supervivencia en lugar de una media.")
+escribir("- A las 10.000 horas de uso, la marca más fiable es **", marca_mejor, "** (",
+         porc(sup_10000[[marca_mejor]], 0), " de discos sin fallo) y la menos fiable **", marca_peor,
+         "** (", porc(sup_10000[[marca_peor]], 0), "). El test log-rank da ", texto_p(p_logrank),
+         if (p_logrank < 0.05) ", así que las diferencias entre marcas son estadísticamente significativas."
+         else ", así que no hay evidencia suficiente de que las marcas se comporten distinto.")
+escribir("- El modelo paramétrico con menor AIC es el **", names(aic_supervivencia)[which.min(aic_supervivencia)],
+         "**.")
+escribir("- En el modelo Weibull, β = ", num(beta, 2), ". ",
+         if (beta > 1) paste("Al ser mayor que 1, el riesgo de fallo aumenta con el uso: los discos se",
+                             "desgastan, así que tiene sentido sustituirlos de forma preventiva.")
+         else paste("Al no ser mayor que 1, el riesgo no aumenta con el uso: predominan los fallos",
+                    "tempranos o aleatorios, y la sustitución preventiva no aporta mucho."))
+escribir("- La vida B10 es de ", num(b10, 0), " h (unos ", num(horas_a_anios(b10)),
+         " años con 8 h de uso al día): en ese momento ya ha fallado 1 de cada 10 discos. ",
+         "El tiempo medio hasta el fallo es de ", num(mttf, 0), " h (", num(horas_a_anios(mttf)),
+         " años), y a los 3 años sigue funcionando el ", porc(supervivencia(3 * 8 * 365), 0),
+         " de los discos.\n")
 
 
 # =============================================================================
@@ -561,10 +679,44 @@ print(
     theme(legend.position = "none")
 )
 
+# Interpretación
+factores <- c("el tipo de dispositivo", "el tipo de cliente", "la categoría de trabajo")
+significativos <- function(tabla_anova) {
+  sig <- factores[tabla_anova$`Pr(>F)`[1:3] < 0.05]
+  if (length(sig) == 0) "ninguno de los factores estudiados" else paste(sig, collapse = ", ")
+}
+i_max <- which.max(tabla_objetivos$Ahorro_Coste_Potencial * tabla_objetivos$Volumen_Reparaciones)
+fila_max <- tabla_objetivos[i_max, ]
+fila_50 <- tabla_simulacion[which.min(abs(tabla_simulacion$Tasa_Mejora - 0.5)), ]
+
+escribir("## 5. Dónde se puede mejorar\n")
+escribir("- Según el ANOVA (p < 0,05), en el tiempo de reparación influye ", significativos(anova_tiempo),
+         ", y en el coste influye ", significativos(anova_coste), ".")
+escribir("- El tipo de equipo con más margen de ahorro es **", as.character(fila_max$Tipo_Dispositivo),
+         "**: su coste mediano es de ", num(fila_max$Coste_Actual_Mediana, 0), " € frente a un objetivo de ",
+         num(fila_max$Coste_Objetivo_Q1, 0), " € (lo que ya consigue el 25 % más eficiente), y suma ",
+         fila_max$Volumen_Reparaciones, " reparaciones.")
+escribir("- Si se redujera a la mitad el exceso sobre el objetivo en cada reparación, se ahorrarían unas ",
+         num(fila_50$Ahorro_Total_Horas, 0), " horas y ", num(fila_50$Ahorro_Total_Euros, 0),
+         " € en el periodo analizado (", porc(fila_50$Ahorro_Total_Euros / coste_base),
+         " de la facturación).")
+escribir("- Una subida del 20 % en la mano de obra aumentaría el coste total en ", num(impacto_servicio, 0),
+         " €, frente a ", num(impacto_material, 0), " € si la subida fuera en el material. ",
+         if (impacto_servicio > impacto_material)
+           paste("El coste depende más del tiempo de los técnicos que de las piezas, así que mejorar",
+                 "la eficiencia del taller es la palanca principal.")
+         else paste("El coste depende más de las piezas que del tiempo de los técnicos, así que",
+                    "negociar con proveedores es la palanca principal."))
+
 
 # --- Cierre ---
+con <- file("resultados/informe.md", encoding = "UTF-8")
+writeLines(informe, con)
+close(con)
+
 if (!interactive()) {
   dev.off()
   cat("Gráficos guardados en resultados/graficos.pdf\n")
 }
+cat("Informe guardado en resultados/informe.md\n")
 cat("Análisis terminado. Tablas en la carpeta resultados/\n")

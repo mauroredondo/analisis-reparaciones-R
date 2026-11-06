@@ -10,7 +10,9 @@ Rplots.pdf
 
 # macOS y VS Code
 .DS_Store
-.vscode/
+# (se sube solo la configuración del proyecto, que abre el informe en vista previa)
+.vscode/*
+!.vscode/settings.json
 
 # Seguridad: nunca subir los datos reales de las prácticas
 *CAB*

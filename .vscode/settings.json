@@ -1,0 +1,6 @@
+{
+  // Abre el informe generado directamente en la vista previa de Markdown
+  "workbench.editorAssociations": {
+    "**/resultados/informe.md": "vscode.markdown.preview.editor"
+  }
+}

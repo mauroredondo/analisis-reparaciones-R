@@ -1,6 +1,6 @@
 # Análisis estadístico de un servicio técnico de reparaciones (R)
 
-Durante mis prácticas en una empresa de servicios informáticos analicé su histórico de reparaciones para responder a cuatro preguntas de negocio:
+Durante mis prácticas (450 h) en una empresa de servicios informáticos analicé su histórico de reparaciones para responder a cuatro preguntas de negocio:
 
 1. ¿Cuánto tarda y cuánto cuesta una reparación típica, y cómo se distribuyen esos valores?
 2. ¿Qué factores explican que una reparación sea más larga o más cara?
@@ -24,6 +24,7 @@ datos/
   reparaciones_simuladas.csv
   fiabilidad_simulada.csv
 resultados/                se crea al ejecutar el análisis (no se sube a GitHub)
+  informe.md               interpretación de los resultados, en texto
   graficos.pdf             todos los gráficos
   tabla_objetivos.csv      objetivos de eficiencia por tipo de equipo
 ```
@@ -116,6 +117,14 @@ Rscript R/00_instalar_paquetes.R   # solo la primera vez
 Rscript R/01_generar_datos.R       # crea los CSV en datos/
 Rscript R/02_analisis.R            # genera resultados/
 ```
+
+Además de los gráficos y las tablas, el script escribe una interpretación de cada bloque: qué distribución ajusta mejor, qué marcas de disco son más fiables, dónde está el mayor margen de ahorro… Ese texto sale en la consola y se guarda en `resultados/informe.md`. Se calcula a partir de los resultados, así que cambia si cambian los datos.
+
+**Ver el informe con formato:**
+
+- **VS Code:** si abres la carpeta del proyecto, `informe.md` se abre directamente en vista previa (lo configura `.vscode/settings.json`). Si no, ábrelo y pulsa **Cmd+Shift+V** en macOS o **Ctrl+Shift+V** en Windows y Linux. Para verlo al lado del código: **Cmd+K** y luego **V** (macOS) o **Ctrl+K** y luego **V** (Windows y Linux).
+- **RStudio:** abre el archivo y pulsa **Visual**, en la barra de arriba del editor.
+- **Cualquier editor de texto:** se lee igual, solo que sin formato.
 
 Con `Rscript` los gráficos se guardan en `resultados/graficos.pdf`. Si abres `02_analisis.R` en VS Code (con la extensión de R) o en RStudio y lo ejecutas línea a línea, los gráficos salen en pantalla.
 
