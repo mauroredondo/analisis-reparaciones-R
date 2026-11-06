@@ -11,7 +11,7 @@ Durante mis prácticas (450 h) en una empresa de servicios informáticos analic�
 
 Este repositorio contiene el análisis completo en R, reorganizado y documentado para que cualquiera pueda ejecutarlo.
 
-> **Sobre los datos.** Los datos reales de la empresa son confidenciales y no están aquí. El script `R/01_generar_datos.R` crea datos **simulados** con la misma estructura y un comportamiento parecido: distribuciones asimétricas, reparaciones atípicas muy largas o caras, diferencias entre tipos de equipo y fallos de disco tipo Weibull con censura. Por eso las cifras que produce este repositorio son ilustrativas y no corresponden a la empresa.
+> **Sobre los datos.** Los datos reales de la empresa son confidenciales y no están aquí. El script `R/01_generar_datos.R` crea datos **simulados** con la misma estructura y un comportamiento parecido: distribuciones asimétricas, reparaciones atípicas muy largas o caras, diferencias entre tipos de equipo y fallos de disco tipo Weibull con censura, más un pequeño porcentaje de fallos prematuros (defectos de fábrica). Por eso las cifras que produce este repositorio son ilustrativas y no corresponden a la empresa.
 
 ---
 
@@ -30,6 +30,8 @@ resultados/                se crea al ejecutar el análisis (no se sube a GitHub
   informe.es.md            interpretación de los resultados (español)
   graficos.pdf             todos los gráficos
   tabla_objetivos.csv      objetivos de eficiencia por tipo de equipo
+  tabla_weibull.csv        fiabilidad del modelo Weibull a 1, 2, 3, 5, 7 y 10 años
+  tabla_fiabilidad_marcas.csv   vida característica, MTTF y B10 por marca
 ```
 
 ---
@@ -62,13 +64,14 @@ En el taller se hace un diagnóstico S.M.A.R.T. a los discos de los equipos que 
 
 - **Kaplan-Meier por fabricante**, con el test log-rank para comprobar si las diferencias entre marcas son significativas.
 - **Modelos paramétricos** (Weibull, exponencial y log-normal), comparados con el AIC y superpuestos a la curva de Kaplan-Meier.
-- **Indicadores del modelo Weibull**: parámetro de forma β (si es mayor que 1, el riesgo de fallo crece con el uso), vida característica η, tiempo medio hasta el fallo (MTTF) y vida B10 (horas a las que ha fallado el 10 % de los discos).
+- **Weibull por marca**: un modelo con una vida característica distinta para cada fabricante, que se compara por AIC con el Weibull único. Da una tabla de η, MTTF y B10 por marca.
+- **Indicadores del modelo Weibull**: parámetro de forma β (si es claramente mayor que 1, el riesgo de fallo crece con el uso; cerca de 1, es casi constante), vida característica η, tiempo medio hasta el fallo (MTTF) y vida B10 (horas a las que ha fallado el 10 % de los discos).
 - **Funciones de fiabilidad**: tasa de fallo h(t), supervivencia S(t) y probabilidad acumulada de fallo F(t), más una tabla para 1, 2, 3, 5, 7 y 10 años de uso (suponiendo 8 horas al día).
 
 ### 5. Optimización de procesos
 
 - **Clasificación de las intervenciones.** El texto libre de cada reparación se clasifica por palabras clave en Hardware, Software o Mantenimiento.
-- **ANOVA.** Mide cuánto influyen el tipo de dispositivo, el tipo de cliente y la categoría de trabajo en las horas y en el coste.
+- **ANOVA.** Mide cuánto influyen el tipo de dispositivo, el tipo de cliente y la categoría de trabajo en las horas y en el coste. Se hace sobre los logaritmos, porque con los valores sin transformar unas pocas reparaciones extremas inflan la varianza residual y tapan diferencias reales (por ejemplo, que los servidores tardan más).
 - **Objetivos de eficiencia.** Para cada tipo de equipo se compara la situación actual (mediana) con un objetivo realista: el primer cuartil, es decir, lo que ya consigue el 25 % de reparaciones más eficientes.
 - **Simulación de ahorro.** Calcula cuántas horas y euros se ahorrarían si se redujera un 10 %, un 20 %… hasta un 100 % del exceso sobre ese objetivo.
 - **Análisis de sensibilidad.** Compara qué afecta más al coste total: una subida del 20 % en el material o en la mano de obra.
@@ -139,6 +142,8 @@ El generador usa una semilla fija, así que siempre produce los mismos datos. Pa
 
 - Los datos son simulados. El análisis sirve para mostrar el método, no para sacar conclusiones sobre una empresa real.
 - El ANOVA es secuencial (tipo I), así que el orden de los factores en el modelo influye en el resultado. Con datos desequilibrados convendría un ANOVA de tipo II.
+- En los datos simulados, los discos de cada marca se desgastan con el uso (Weibull con β = 1,5), pero un pequeño porcentaje falla en las primeras horas. Mezclados, esos fallos prematuros compensan el desgaste y el β estimado sale cerca de 1 (riesgo casi constante). Es una limitación de ajustar un solo Weibull cuando hay dos mecanismos de fallo; un modelo de mezcla los separaría.
+- La simulación de ahorro es optimista: el objetivo es el primer cuartil de cada tipo de equipo, sin separar por categoría de trabajo. Además, el coste total es lo que paga el cliente, así que el ahorro es también facturación que el taller dejaría de ingresar.
 - La clasificación de intervenciones por palabras clave depende de cómo estén redactadas. Con textos muy distintos habría que revisar las listas de palabras.
 - El análisis está hecho para el caso concreto de un servicio técnico. No es una herramienta genérica para cualquier CSV.
 

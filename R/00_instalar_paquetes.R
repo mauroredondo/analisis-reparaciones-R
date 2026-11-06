@@ -15,6 +15,11 @@ paquetes <- c(
 # Instalamos en la librería personal del usuario. La librería del sistema
 # suele no tener permisos de escritura (sobre todo en macOS).
 lib_usuario <- Sys.getenv("R_LIBS_USER")
+if (lib_usuario == "") {
+  # Si R no define la variable, usamos la ruta habitual de la librería personal
+  lib_usuario <- file.path(Sys.getenv("HOME"), "R", "library")
+  message("R_LIBS_USER no está definida. Se instalará en: ", lib_usuario)
+}
 dir.create(lib_usuario, recursive = TRUE, showWarnings = FALSE)
 .libPaths(c(lib_usuario, .libPaths()))
 

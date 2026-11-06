@@ -84,7 +84,9 @@ horas_a_anios <- function(h) h / (8 * 365)  # suponiendo 8 horas de uso al día
 
 # Si el script se ejecuta entero con Rscript, todos los gráficos van a un PDF
 if (!interactive()) {
-  pdf("resultados/graficos.pdf", width = 10, height = 7)
+  # La codificación Latin-9 incluye el símbolo € (la de por defecto no), así que
+  # los títulos y ejes con euros salen bien en el PDF
+  pdf("resultados/graficos.pdf", width = 10, height = 7, encoding = "ISOLatin9.enc")
 }
 
 
@@ -324,7 +326,22 @@ print(outliers_t %>% arrange(desc(Tiempo_Horas)) %>%
 mas_cara <- datos[which.max(datos$Coste_Total), ]
 cola_pesada <- c("Pareto", "Burr")
 
-gana_cola_pesada <- mejor_ajuste(gof_t2) %in% cola_pesada || mejor_ajuste(gof_c2) %in% cola_pesada
+# Tiempo y coste se evalúan por separado: que gane una cola pesada en el tiempo
+# no dice nada sobre el coste, y viceversa
+gana_t <- mejor_ajuste(gof_t2) %in% cola_pesada
+gana_c <- mejor_ajuste(gof_c2) %in% cola_pesada
+cola_es <- c(
+  if (gana_t) "En el tiempo hay más reparaciones muy largas de las que predice una log-normal.",
+  if (gana_c) paste("En el coste hay más valores extremos de los que predice una log-normal.",
+                    "Para presupuestar importa: las reparaciones caras no son tan raras como parecen."),
+  if (!gana_t && !gana_c) "La log-normal sigue siendo suficiente para describir los extremos."
+)
+cola_en <- c(
+  if (gana_t) "For time, there are more very long repairs than a log-normal predicts.",
+  if (gana_c) paste("For cost, there are more extreme values than a log-normal predicts.",
+                    "This matters for budgeting: expensive repairs are less rare than they seem."),
+  if (!gana_t && !gana_c) "The log-normal is still good enough to describe the extremes."
+)
 
 escribir(es = "## 2. Qué distribución siguen los tiempos y los costes\n",
          en = "## 2. Which distribution do times and costs follow?\n")
@@ -337,17 +354,11 @@ escribir(
 )
 escribir(
   es = paste0("- Al añadir distribuciones de cola pesada, gana la **", mejor_ajuste(gof_t2),
-              "** para el tiempo y la **", mejor_ajuste(gof_c2), "** para el coste.",
-              if (gana_cola_pesada)
-                paste(" Hay más valores extremos de los que predice una log-normal. Para",
-                      "presupuestar importa: las reparaciones caras no son tan raras como parecen.")
-              else " La log-normal sigue siendo suficiente para describir los extremos."),
+              "** para el tiempo y la **", mejor_ajuste(gof_c2), "** para el coste. ",
+              paste(cola_es, collapse = " ")),
   en = paste0("- When heavy-tailed distributions are added, **", mejor_ajuste(gof_t2),
-              "** wins for time and **", mejor_ajuste(gof_c2), "** for cost.",
-              if (gana_cola_pesada)
-                paste(" There are more extreme values than a log-normal predicts. This matters for",
-                      "budgeting: expensive repairs are less rare than they seem.")
-              else " The log-normal is still good enough to describe the extremes.")
+              "** wins for time and **", mejor_ajuste(gof_c2), "** for cost. ",
+              paste(cola_en, collapse = " "))
 )
 escribir(
   es = paste0("- Con el criterio del boxplot hay ", nrow(outliers_t), " reparaciones atípicas por ",
@@ -428,11 +439,24 @@ escribir(es = "## 3. Qué explica el coste\n",
          en = "## 3. What drives cost\n")
 escribir(
   es = paste0("- La correlación de Spearman entre horas y coste total es de ", num_es(rho_s, 2),
-              " (relación ", fuerza_es(rho_s), "). Pearson da ", num_es(rho_p, 2), ". Pearson se ",
-              "ve mucho más afectada por los valores extremos, por eso se usa Spearman."),
+              " (relación ", fuerza_es(rho_s), "). Pearson da ", num_es(rho_p, 2), ". ",
+              if (rho_p > rho_s)
+                paste("Pearson sale más alta porque las reparaciones extremas lo son a la vez en horas",
+                      "y en coste, y arrastran la correlación. Spearman, que usa rangos, describe",
+                      "mejor la relación en una reparación típica.")
+              else
+                paste("Spearman usa rangos y es más robusta ante los valores extremos, que son",
+                      "frecuentes en estas distribuciones.")),
   en = paste0("- The Spearman correlation between hours and total cost is ", num_en(rho_s, 2),
               " (", fuerza_en(rho_s), " relationship). Pearson gives ", num_en(rho_p, 2),
-              ". Pearson is much more sensitive to extreme values, which is why Spearman is used.")
+              ". ",
+              if (rho_p > rho_s)
+                paste("Pearson is higher because extreme repairs are extreme in both hours and cost,",
+                      "which drags the correlation up. Spearman, which uses ranks, better describes",
+                      "the relationship in a typical repair.")
+              else
+                paste("Spearman uses ranks and is more robust to extreme values, which are common",
+                      "in these distributions."))
 )
 escribir(
   es = paste0("- La regresión explica el ", porc_es(r2), " de la variabilidad del coste total. ",
@@ -521,8 +545,29 @@ eta  <- exp(coef(modelo_weibull)[[1]])  # escala: a las eta horas ha fallado el 
 mttf <- eta * gamma(1 + 1 / beta)       # tiempo medio hasta el fallo
 b10  <- eta * (-log(0.90))^(1 / beta)   # vida B10: horas a las que ha fallado el 10 %
 
-cat(sprintf("Weibull: beta = %.2f | eta = %.0f h | MTTF = %.0f h | B10 = %.0f h\n",
+cat(sprintf("Weibull (todas las marcas juntas): beta = %.2f | eta = %.0f h | MTTF = %.0f h | B10 = %.0f h\n",
             beta, eta, mttf, b10))
+
+# Weibull por marca: una forma beta común, pero una escala (vida característica)
+# distinta para cada marca. Un único Weibull para marcas con vidas muy distintas
+# mezcla poblaciones y aplana la curva: beta sale cerca de 1 (riesgo constante)
+# aunque cada marca, por separado, se desgaste con el uso.
+modelo_weibull_marca <- survreg(Surv(Horas_Uso, Evento) ~ Marca, data = discos, dist = "weibull")
+beta_marca <- 1 / modelo_weibull_marca$scale
+nombres_marcas <- levels(discos$Marca)
+# type = "lp" devuelve log(eta) de cada marca
+eta_marca <- exp(predict(modelo_weibull_marca, type = "lp",
+                         newdata = data.frame(Marca = factor(nombres_marcas, levels = nombres_marcas))))
+tabla_marcas <- data.frame(
+  Marca  = nombres_marcas,
+  Eta_h  = round(as.numeric(eta_marca)),
+  MTTF_h = round(as.numeric(eta_marca) * gamma(1 + 1 / beta_marca)),
+  B10_h  = round(as.numeric(eta_marca) * (-log(0.90))^(1 / beta_marca))
+)
+cat(sprintf("Weibull por marca: beta = %.2f\n", beta_marca))
+print(tabla_marcas)
+write.csv2(tabla_marcas, "resultados/tabla_fiabilidad_marcas.csv",
+           row.names = FALSE, fileEncoding = "UTF-8")
 
 # Funciones de fiabilidad del modelo Weibull
 tasa_fallo   <- function(t) (beta / eta) * (t / eta)^(beta - 1)  # h(t)
@@ -560,6 +605,8 @@ tabla_weibull <- data.frame(
   Tasa_Fallo_ht       = signif(tasa_fallo(horas), 3)
 )
 print(tabla_weibull)
+write.csv2(tabla_weibull, "resultados/tabla_weibull.csv",
+           row.names = FALSE, fileEncoding = "UTF-8")
 
 # Interpretación
 # Test log-rank: ¿son distintas las curvas de supervivencia de las marcas?
@@ -572,8 +619,12 @@ sup_10000 <- setNames(km_10000$surv, sub("Marca=", "", as.character(km_10000$str
 marca_mejor <- names(sup_10000)[which.max(sup_10000)]
 marca_peor  <- names(sup_10000)[which.min(sup_10000)]
 
-modelo_ganador <- names(aic_supervivencia)[which.min(aic_supervivencia)]
-nombres_modelos_en <- c(Weibull = "Weibull", Exponencial = "exponential", LogNormal = "log-normal")
+# El Weibull por marca usa los mismos datos, así que su AIC es comparable
+aic_todos <- c(aic_supervivencia, "Weibull por marca" = AIC(modelo_weibull_marca))
+print(aic_todos)
+modelo_ganador <- names(aic_todos)[which.min(aic_todos)]
+nombres_modelos_en <- c(Weibull = "Weibull", Exponencial = "exponential", LogNormal = "log-normal",
+                        "Weibull por marca" = "Weibull-by-brand")
 
 escribir(es = "## 4. Fiabilidad de los discos\n",
          en = "## 4. Disk reliability\n")
@@ -601,35 +652,66 @@ escribir(
               else ", so there is not enough evidence that brands behave differently.")
 )
 escribir(
-  es = paste0("- El modelo paramétrico con menor AIC es el **", modelo_ganador, "**."),
+  es = paste0("- El modelo paramétrico con menor AIC es el **", modelo_ganador, "**",
+              if (modelo_ganador == "Weibull por marca")
+                " (misma forma para todos los discos y una vida característica distinta por marca)",
+              "."),
   en = paste0("- The parametric model with the lowest AIC is the **",
-              nombres_modelos_en[[modelo_ganador]], "** model.")
+              nombres_modelos_en[[modelo_ganador]], "** model",
+              if (modelo_ganador == "Weibull por marca")
+                " (same shape for all disks and a different characteristic life for each brand)",
+              ".")
 )
 escribir(
-  es = paste0("- En el modelo Weibull, β = ", num_es(beta, 2), ". ",
-              if (beta > 1) paste("Al ser mayor que 1, el riesgo de fallo aumenta con el uso: los",
-                                  "discos se desgastan, así que tiene sentido sustituirlos de forma",
-                                  "preventiva.")
-              else paste("Al no ser mayor que 1, el riesgo no aumenta con el uso: predominan los",
-                         "fallos tempranos o aleatorios, y la sustitución preventiva no aporta mucho.")),
-  en = paste0("- In the Weibull model, β = ", num_en(beta, 2), ". ",
-              if (beta > 1) paste("Since it is greater than 1, the failure risk increases with use:",
-                                  "disks wear out, so preventive replacement makes sense.")
-              else paste("Since it is not greater than 1, the risk does not increase with use:",
-                         "early or random failures dominate, and preventive replacement adds",
-                         "little value."))
+  es = paste0("- Un único Weibull para todos los discos da β = ", num_es(beta, 2), ". Permitiendo una ",
+              "vida característica distinta por marca, β = ", num_es(beta_marca, 2),
+              ", así que mezclar las marcas apenas cambia la conclusión. ",
+              if (beta_marca > 1.1) paste("Al ser claramente mayor que 1, el riesgo de fallo aumenta",
+                                          "con el uso: los discos se desgastan, así que tiene sentido",
+                                          "sustituirlos de forma preventiva.")
+              else if (beta_marca >= 0.9) paste("Al estar cerca de 1, el riesgo de fallo es casi",
+                                                "constante con el uso: no hay un desgaste claro, y los",
+                                                "fallos tempranos (defectos de fábrica) compensan el desgaste",
+                                                "de los demás. La sustitución preventiva por antigüedad",
+                                                "aportaría poco.")
+              else paste("Al ser claramente menor que 1, el riesgo baja con el uso: predominan los",
+                         "fallos tempranos, y la sustitución preventiva no aporta mucho.")),
+  en = paste0("- A single Weibull for all disks gives β = ", num_en(beta, 2), ". Allowing a ",
+              "different characteristic life for each brand, β = ", num_en(beta_marca, 2),
+              ", so pooling the brands barely changes the conclusion. ",
+              if (beta_marca > 1.1) paste("Since it is clearly greater than 1, the failure risk",
+                                          "increases with use: disks wear out, so preventive",
+                                          "replacement makes sense.")
+              else if (beta_marca >= 0.9) paste("Since it is close to 1, the failure risk is almost",
+                                                "constant over time: there is no clear wear-out, and",
+                                                "early failures (factory defects) offset the wear of the",
+                                                "rest. Age-based preventive replacement would add little.")
+              else paste("Since it is clearly below 1, the risk decreases with use: early failures",
+                         "dominate, and preventive replacement adds little value."))
 )
 escribir(
-  es = paste0("- La vida B10 es de ", num_es(b10, 0), " h (unos ", num_es(horas_a_anios(b10)),
+  es = paste0("- Con todas las marcas juntas, la vida B10 es de ", num_es(b10, 0), " h (unos ", num_es(horas_a_anios(b10)),
               " años con 8 h de uso al día): en ese momento ya ha fallado 1 de cada 10 discos. ",
               "El tiempo medio hasta el fallo es de ", num_es(mttf, 0), " h (",
               num_es(horas_a_anios(mttf)), " años), y a los 3 años sigue funcionando el ",
-              porc_es(supervivencia(3 * 8 * 365), 0), " de los discos.\n"),
-  en = paste0("- The B10 life is ", num_en(b10, 0), " h (about ", num_en(horas_a_anios(b10)),
+              porc_es(supervivencia(3 * 8 * 365), 0), " de los discos."),
+  en = paste0("- With all brands pooled, the B10 life is ", num_en(b10, 0), " h (about ", num_en(horas_a_anios(b10)),
               " years at 8 h of use per day): by then 1 in 10 disks has failed. The mean time ",
               "to failure is ", num_en(mttf, 0), " h (", num_en(horas_a_anios(mttf)),
               " years), and after 3 years ", porc_en(supervivencia(3 * 8 * 365), 0),
-              " of disks are still working.\n")
+              " of disks are still working.")
+)
+i_peor <- which.min(tabla_marcas$B10_h)
+i_mejor <- which.max(tabla_marcas$B10_h)
+escribir(
+  es = paste0("- Por marca (Weibull con escala propia), la vida B10 va de ",
+              num_es(tabla_marcas$B10_h[i_peor], 0), " h (", tabla_marcas$Marca[i_peor], ") a ",
+              num_es(tabla_marcas$B10_h[i_mejor], 0), " h (", tabla_marcas$Marca[i_mejor],
+              "). El detalle está en `tabla_fiabilidad_marcas.csv`.\n"),
+  en = paste0("- By brand (Weibull with its own scale), the B10 life ranges from ",
+              num_en(tabla_marcas$B10_h[i_peor], 0), " h (", tabla_marcas$Marca[i_peor], ") to ",
+              num_en(tabla_marcas$B10_h[i_mejor], 0), " h (", tabla_marcas$Marca[i_mejor],
+              "). Details are in `tabla_fiabilidad_marcas.csv`.\n")
 )
 
 
@@ -674,10 +756,17 @@ print(datos %>% count(Categoria_Trabajo))
 
 # --- 5.2 ANOVA: ¿qué factores influyen en el tiempo y en el coste? ---
 # anova() hace un ANOVA secuencial (tipo I): el orden de los factores importa.
-modelo_tiempo_cual <- lm(Tiempo_Horas ~ Tipo_Dispositivo + Cliente_Tipo + Categoria_Trabajo,
-                         data = datos)
-modelo_coste_cual  <- lm(Coste_Total ~ Tipo_Dispositivo + Cliente_Tipo + Categoria_Trabajo,
-                         data = datos)
+#
+# Tiempo y coste tienen cola larga a la derecha, y el ANOVA supone residuos de
+# aspecto normal y varianza parecida entre grupos. Con los valores sin
+# transformar, unas pocas reparaciones extremas inflan la varianza residual y
+# tapan diferencias reales (por ejemplo, que los servidores tardan más). Con el
+# logaritmo los efectos pasan a ser multiplicativos y el supuesto se cumple mucho mejor.
+datos_anova <- datos %>% filter(Tiempo_Horas > 0, Coste_Total > 0)
+modelo_tiempo_cual <- lm(log(Tiempo_Horas) ~ Tipo_Dispositivo + Cliente_Tipo + Categoria_Trabajo,
+                         data = datos_anova)
+modelo_coste_cual  <- lm(log(Coste_Total) ~ Tipo_Dispositivo + Cliente_Tipo + Categoria_Trabajo,
+                         data = datos_anova)
 anova_tiempo <- anova(modelo_tiempo_cual)
 anova_coste  <- anova(modelo_coste_cual)
 print(anova_tiempo)
@@ -686,10 +775,10 @@ print(anova_coste)
 # Suma de cuadrados de cada factor: cuánta variabilidad explica
 par(mfrow = c(1, 2))
 barplot(anova_tiempo$`Sum Sq`[1:3], names.arg = c("Dispositivo", "Cliente", "Categoría"),
-        main = "Tiempo", col = "lightblue", ylab = "Suma de cuadrados",
+        main = "Tiempo (log)", col = "lightblue", ylab = "Suma de cuadrados",
         ylim = c(0, max(anova_tiempo$`Sum Sq`[1:3]) * 1.2))
 barplot(anova_coste$`Sum Sq`[1:3], names.arg = c("Dispositivo", "Cliente", "Categoría"),
-        main = "Coste", col = "orange", ylab = "Suma de cuadrados",
+        main = "Coste (log)", col = "orange", ylab = "Suma de cuadrados",
         ylim = c(0, max(anova_coste$`Sum Sq`[1:3]) * 1.2))
 par(mfrow = c(1, 1))
 
@@ -797,14 +886,34 @@ print(
 # Interpretación
 factores_es <- c("el tipo de dispositivo", "el tipo de cliente", "la categoría de trabajo")
 factores_en <- c("device type", "customer type", "job category")
-significativos <- function(tabla_anova, factores, ninguno) {
-  sig <- factores[tabla_anova$`Pr(>F)`[1:3] < 0.05]
-  if (length(sig) == 0) ninguno else paste(sig, collapse = ", ")
+# Posiciones de los factores con p < 0,05 en cada tabla ANOVA
+idx_t <- which(anova_tiempo$`Pr(>F)`[1:3] < 0.05)
+idx_c <- which(anova_coste$`Pr(>F)`[1:3] < 0.05)
+unir <- function(x, y) {
+  if (length(x) > 1) paste(paste(head(x, -1), collapse = ", "), y, tail(x, 1)) else x
 }
-sig_t_es <- significativos(anova_tiempo, factores_es, "ninguno de los factores estudiados")
-sig_c_es <- significativos(anova_coste,  factores_es, "ninguno de los factores estudiados")
-sig_t_en <- significativos(anova_tiempo, factores_en, "none of the factors studied")
-sig_c_en <- significativos(anova_coste,  factores_en, "none of the factors studied")
+plural_es <- function(idx) if (length(idx) > 1) "n" else ""
+# (las llaves { } evitan que el "else" en otra línea dé error fuera de una función)
+t_es <- if (length(idx_t) == 0) {
+  "ningún factor influye de forma significativa en el tiempo de reparación"
+} else {
+  paste0("en el tiempo de reparación influye", plural_es(idx_t), " ", unir(factores_es[idx_t], "y"))
+}
+c_es <- if (length(idx_c) == 0) {
+  "ningún factor influye de forma significativa en el coste"
+} else {
+  paste0("en el coste influye", plural_es(idx_c), " ", unir(factores_es[idx_c], "y"))
+}
+t_en <- if (length(idx_t) == 0) {
+  "no factor significantly affects repair time"
+} else {
+  paste0("repair time is significantly affected by ", unir(factores_en[idx_t], "and"))
+}
+c_en <- if (length(idx_c) == 0) {
+  "no factor significantly affects cost"
+} else {
+  paste0("cost is significantly affected by ", unir(factores_en[idx_c], "and"))
+}
 i_max <- which.max(tabla_objetivos$Ahorro_Coste_Potencial * tabla_objetivos$Volumen_Reparaciones)
 fila_max <- tabla_objetivos[i_max, ]
 fila_50 <- tabla_simulacion[which.min(abs(tabla_simulacion$Tasa_Mejora - 0.5)), ]
@@ -815,10 +924,9 @@ manda_servicio <- impacto_servicio > impacto_material
 escribir(es = "## 5. Dónde se puede mejorar\n",
          en = "## 5. Where to improve\n")
 escribir(
-  es = paste0("- Según el ANOVA (p < 0,05), en el tiempo de reparación influye ", sig_t_es,
-              ", y en el coste influye ", sig_c_es, "."),
-  en = paste0("- According to the ANOVA (p < 0.05), repair time is significantly affected by ",
-              sig_t_en, ", and cost by ", sig_c_en, ".")
+  es = paste0("- Según el ANOVA sobre los logaritmos (p < 0,05), ", t_es, ", y ", c_es, "."),
+  en = paste0("- According to the ANOVA on log-transformed values (p < 0.05), ", t_en, ", and ",
+              c_en, ".")
 )
 escribir(
   es = paste0("- El tipo de equipo con más margen de ahorro es **", tipo_max, "**: su coste mediano ",
@@ -834,11 +942,17 @@ escribir(
   es = paste0("- Si se redujera a la mitad el exceso sobre el objetivo en cada reparación, se ",
               "ahorrarían unas ", num_es(fila_50$Ahorro_Total_Horas, 0), " horas y ",
               num_es(fila_50$Ahorro_Total_Euros, 0), " € en el periodo analizado (",
-              porc_es(fila_50$Ahorro_Total_Euros / coste_base), " de la facturación)."),
+              porc_es(fila_50$Ahorro_Total_Euros / coste_base), " de la facturación). Es una ",
+              "estimación optimista: el objetivo es el primer cuartil de cada tipo de equipo, sin ",
+              "separar por categoría de trabajo, y como el coste es lo que paga el cliente, ese ",
+              "ahorro es también facturación que el taller dejaría de ingresar."),
   en = paste0("- Halving the excess over target in every repair would save about ",
               num_en(fila_50$Ahorro_Total_Horas, 0), " hours and €",
               num_en(fila_50$Ahorro_Total_Euros, 0), " over the period analysed (",
-              porc_en(fila_50$Ahorro_Total_Euros / coste_base), " of revenue).")
+              porc_en(fila_50$Ahorro_Total_Euros / coste_base), " of revenue). This is an optimistic ",
+              "estimate: the target is the first quartile of each device type, without separating ",
+              "by job category, and since cost is what the customer pays, that saving is also ",
+              "revenue the workshop would stop earning.")
 )
 escribir(
   es = paste0("- Una subida del 20 % en la mano de obra aumentaría el coste total en ",

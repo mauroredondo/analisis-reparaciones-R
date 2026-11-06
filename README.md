@@ -11,7 +11,7 @@ During my 450-hour internship at an IT services company, I analysed its repair h
 
 This repository contains the full analysis in R, reorganised and documented so that anyone can run it.
 
-> **About the data.** The company's real data is confidential and is not included. The script `R/01_generar_datos.R` generates **simulated** data with the same structure and similar behaviour: skewed distributions, occasional very long or expensive repairs, differences between device types, and Weibull-type disk failures with censoring. The figures this repository produces are therefore illustrative and do not describe the company.
+> **About the data.** The company's real data is confidential and is not included. The script `R/01_generar_datos.R` generates **simulated** data with the same structure and similar behaviour: skewed distributions, occasional very long or expensive repairs, differences between device types, and Weibull-type disk failures with censoring, plus a small share of premature failures (factory defects). The figures this repository produces are therefore illustrative and do not describe the company.
 
 ---
 
@@ -30,6 +30,8 @@ resultados/                created when the analysis runs (not uploaded to GitHu
   informe.es.md            written interpretation of the results (Spanish)
   graficos.pdf             all charts
   tabla_objetivos.csv      efficiency targets by device type
+  tabla_weibull.csv        Weibull reliability at 1, 2, 3, 5, 7 and 10 years
+  tabla_fiabilidad_marcas.csv   characteristic life, MTTF and B10 by brand
 ```
 
 The code, comments and chart titles are in Spanish; the data dictionary below explains every column.
@@ -64,13 +66,14 @@ The workshop runs a S.M.A.R.T. diagnostic on the disks of every device it receiv
 
 - **Kaplan-Meier curves by manufacturer**, with a log-rank test to check whether the differences between brands are significant.
 - **Parametric models** (Weibull, exponential and log-normal), compared by AIC and overlaid on the Kaplan-Meier curve.
-- **Weibull indicators**: shape parameter β (above 1 means the failure risk grows with use), characteristic life η, mean time to failure (MTTF) and B10 life (hours by which 10% of disks have failed).
+- **Weibull by brand**: a model with a different characteristic life for each manufacturer, compared by AIC with the single Weibull. It produces a table of η, MTTF and B10 per brand.
+- **Weibull indicators**: shape parameter β (clearly above 1 means the failure risk grows with use; close to 1 means it is roughly constant), characteristic life η, mean time to failure (MTTF) and B10 life (hours by which 10% of disks have failed).
 - **Reliability functions**: hazard rate h(t), survival S(t) and cumulative failure probability F(t), plus a table for 1, 2, 3, 5, 7 and 10 years of use (assuming 8 hours a day).
 
 ### 5. Process optimisation
 
 - **Job classification.** The free-text description of each repair is classified by keywords into Hardware, Software or Maintenance.
-- **ANOVA.** Measures how much device type, customer type and job category influence hours and cost.
+- **ANOVA.** Measures how much device type, customer type and job category influence hours and cost. It is run on log-transformed values: on the raw values, a few extreme repairs inflate the residual variance and hide real differences (for example, that servers take longer).
 - **Efficiency targets.** For each device type, the current situation (median) is compared with a realistic target: the first quartile, i.e. what the most efficient 25% of repairs already achieve.
 - **Savings simulation.** Calculates how many hours and euros would be saved by cutting 10%, 20%… up to 100% of the excess over that target.
 - **Sensitivity analysis.** Compares which has a bigger impact on total cost: a 20% rise in parts or in labour.
@@ -141,6 +144,8 @@ The generator uses a fixed seed, so it always produces the same data. To try a d
 
 - The data is simulated. The analysis shows the method; it cannot be used to draw conclusions about a real company.
 - The ANOVA is sequential (type I), so the order of the factors in the model affects the result. With unbalanced data a type II ANOVA would be more appropriate.
+- In the simulated data, disks of each brand wear out with use (Weibull with β = 1.5), but a small share fail in the first hours. Pooled, those premature failures offset the wear and the estimated β comes out close to 1 (almost constant risk). This is a limitation of fitting a single Weibull when there are two failure mechanisms; a mixture model would separate them.
+- The savings simulation is optimistic: the target is the first quartile of each device type, without separating by job category. Also, total cost is what the customer pays, so the saving is also revenue the workshop would stop earning.
 - Keyword-based job classification depends on how the descriptions are written. Very different wording would require revising the keyword lists.
 - The analysis is built for the specific case of a repair service. It is not a generic tool for any CSV file.
 
