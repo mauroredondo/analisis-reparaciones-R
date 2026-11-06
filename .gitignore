@@ -1,0 +1,17 @@
+# R y RStudio
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# Resultados generados al ejecutar el análisis
+resultados/
+Rplots.pdf
+
+# macOS y VS Code
+.DS_Store
+.vscode/
+
+# Seguridad: nunca subir los datos reales de las prácticas
+*CAB*
+*_FINAL.csv
